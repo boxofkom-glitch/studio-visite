@@ -508,7 +508,7 @@ export function createViewer(container, project, imageURL, opts = {}) {
   function applyView(s) {
     const v = s.view || {};
     yaw = v.yaw || 0;
-    pitch = v.pitch || 0;
+    pitch = v.pitch ?? (s.type === 'room' ? -0.3 : 0);
     fov = 75;
     walkTo = null;
     if (s.type === 'room') {
