@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Studio Visite</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<style>
+:root{--bg:#f4f2ee;--panel:#fff;--ink:#1d1b18;--mute:#6f6a62;--line:#e3dfd8;--acc:#d2552f;--acc2:#b8441f}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input,select{font:inherit;color:inherit}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap}
+button:hover,.btn:hover{border-color:#bdb7ad}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button.primary:hover{background:var(--acc2)}
+button.ghost{border-color:transparent;background:none}
+button.danger{color:#b3261e}
+button:disabled{opacity:.5;cursor:default}
+input[type=text],input[type=number],select{border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:#fff;min-width:0}
+header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{font-weight:700;font-size:16px;margin-right:6px}
+.brand i{font-style:normal;color:var(--acc)}
+header .grow{flex:1}
+#projName{width:220px;font-weight:600}
+main{display:flex;height:calc(100% - 53px)}
+aside{width:340px;flex:0 0 340px;overflow-y:auto;background:var(--panel);border-right:1px solid var(--line)}
+aside section{padding:14px;border-bottom:1px solid var(--line)}
+aside h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}
+.stack{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:8px;align-items:center}
+.row>label{flex:1}
+.field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mute)}
+.field input,.field select{color:var(--ink);font-size:14px}
+#stage{flex:1;position:relative;background:#111;min-width:0}
+#viewerHost{position:absolute;inset:0}
+.scene-item{display:flex;align-items:center;gap:10px;padding:6px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+.scene-item:hover{background:#f7f5f1}
+.scene-item.sel{border-color:var(--acc);background:#fdf3ef}
+.scene-item .th{width:64px;height:40px;border-radius:6px;background:#ddd center/cover;flex:0 0 auto}
+.scene-item .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.scene-item small{display:block;font-weight:400;color:var(--mute)}
+.tag{font-size:11px;padding:1px 6px;border-radius:6px;background:#eee;color:var(--mute)}
+.star{color:var(--acc);font-size:12px}
+.faces{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.face{position:relative;aspect-ratio:4/3;border:1px dashed #c9c3b9;border-radius:8px;background:#faf8f5 center/cover no-repeat;cursor:pointer;display:flex;align-items:flex-end;padding:0;overflow:hidden}
+.face span{width:100%;font-size:11px;background:rgba(255,255,255,.85);padding:2px 4px;text-align:center}
+.face.has{border-style:solid}
+.face .x{position:absolute;top:2px;right:2px;width:20px;height:20px;padding:0;border-radius:50%;font-size:12px;line-height:1}
+.hs-row{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center}
+.help{color:var(--mute);font-size:12.5px;margin:0}
+.pick-hint{position:absolute;left:50%;top:70px;transform:translateX(-50%);background:var(--acc);color:#fff;padding:8px 14px;border-radius:20px;z-index:5;font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.3)}
+.empty-guide{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;z-index:4;pointer-events:none}
+.empty-guide[hidden],.pick-hint[hidden]{display:none}
+.empty-guide>div{background:#fff;border-radius:14px;max-width:560px;padding:22px 26px;pointer-events:auto;box-shadow:0 8px 40px rgba(0,0,0,.4)}
+.empty-guide h2{margin:0 0 8px;font-size:20px}
+.empty-guide ol{padding-left:20px;margin:10px 0}
+.empty-guide li{margin:6px 0}
+/* fenêtres */
+.modal{position:fixed;inset:0;background:rgba(20,18,15,.6);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal[hidden]{display:none}
+.dlg{background:#fff;border-radius:14px;width:min(1100px,100%);max-height:100%;display:flex;flex-direction:column;overflow:hidden}
+.dlg.small{width:min(560px,100%)}
+.dlg header{border-bottom:1px solid var(--line);font-weight:700}
+.dlg .body{padding:14px;overflow:auto;flex:1;min-height:0}
+.dlg footer{display:flex;gap:8px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--line);flex-wrap:wrap}
+#rcWrap{position:relative;height:min(68vh,700px);background:#222;border-radius:8px;overflow:hidden;touch-action:none}
+#rcCanvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair}
+#planArea{position:relative;width:100%;border-radius:8px;overflow:hidden;background:#eee center/100% 100% no-repeat;cursor:crosshair;max-height:60vh}
+#planArea.grid{background-image:linear-gradient(#ddd 1px,transparent 1px),linear-gradient(90deg,#ddd 1px,transparent 1px);background-size:24px 24px;background-color:#f7f7f7}
+#planArea .dot{position:absolute;transform:translate(-50%,-50%);background:var(--acc);color:#fff;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:600;white-space:nowrap;pointer-events:none}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.chips button.sel{background:var(--acc);border-color:var(--acc);color:#fff}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1d1b18;color:#fff;padding:10px 16px;border-radius:10px;z-index:100;box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.busy{position:fixed;inset:0;background:rgba(255,255,255,.6);display:grid;place-items:center;z-index:90;font-weight:600;font-size:16px}
+.preview{position:fixed;inset:0;z-index:80;background:#000}
+.preview iframe{width:100%;height:100%;border:0;display:block}
+.preview button{position:absolute;left:50%;top:12px;transform:translateX(-50%)}
+code{background:#f1eee9;padding:1px 5px;border-radius:4px}
+@media (max-width:800px){
+  main{flex-direction:column-reverse;height:auto}
+  #stage{height:58vh;flex:0 0 58vh}
+  aside{width:auto;flex:none;border-right:0}
+  #projName{width:100%;order:9}
+  header .grow{display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Studio <i>Visite</i></div>
+  <select id="projSel" title="Mes projets"></select>
+  <button id="btnNew" title="Nouveau projet">+ Nouveau</button>
+  <input type="text" id="projName" placeholder="Nom de la visite">
+  <div class="grow"></div>
+  <button id="btnOpen" class="ghost" title="Ouvrir un fichier projet (.visite)">Ouvrir…</button>
+  <button id="btnSave" class="ghost" title="Sauvegarder le projet dans un fichier (.visite)">Sauvegarder…</button>
+  <button id="btnPreview">Aperçu</button>
+  <button id="btnExport" class="primary">Exporter la visite</button>
+</header>
+<main>
+  <aside>
+    <section>
+      <h3>Pièces</h3>
+      <div id="sceneList" class="stack"></div>
+      <div class="stack" style="margin-top:10px">
+        <label class="btn primary" style="background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600">+ Ajouter des photos 360° / panoramas
+          <input type="file" id="inPano" accept="image/*" multiple hidden></label>
+        <button id="btnRoom">+ Pièce 3D (murs en photo)</button>
+        <button id="btnPlan">Plan &amp; mini-carte…</button>
+      </div>
+    </section>
+    <div id="props"></div>
+  </aside>
+  <div id="stage">
+    <div id="viewerHost"></div>
+    <div id="pickHint" class="pick-hint" hidden>Cliquez dans la vue pour placer le point · Échap pour annuler</div>
+    <div id="guide" class="empty-guide" hidden><div>
+      <h2>Créer une visite virtuelle</h2>
+      <ol>
+        <li><b>Photographiez chaque pièce</b> depuis son centre : idéalement en 360° (caméra 360° ou appli de photosphère), sinon en mode <i>Panorama</i> de l'appareil photo, en tournant lentement sur vous-même.</li>
+        <li><b>Ajoutez les photos</b> ici : une photo = une pièce de la visite.</li>
+        <li><b>Reliez les pièces</b> avec des points de passage (portes, couloirs).</li>
+        <li><b>Exportez</b> : vous obtenez un fichier unique à mettre en ligne et à partager.</li>
+      </ol>
+      <p class="help">Pas de photo 360° ? Créez une <b>pièce 3D</b> : indiquez ses dimensions, puis plaquez une photo sur chaque mur, le sol et le plafond.</p>
+    </div></div>
+  </div>
+</main>
+
+<!-- redressement d'une photo de mur -->
+<div class="modal" id="mRect" hidden><div class="dlg">
+  <header id="rcTitle">Redresser la photo</header>
+  <div class="body">
+    <p class="help" style="margin-bottom:8px">Faites glisser les 4 points sur les coins du mur (ou de la zone à garder). La photo sera redressée et mise aux proportions réelles.</p>
+    <div id="rcWrap"><canvas id="rcCanvas"></canvas></div>
+  </div>
+  <footer>
+    <button id="rcRotate">Pivoter ↻</button>
+    <button id="rcFull">Toute la photo</button>
+    <div style="flex:1"></div>
+    <button id="rcCancel">Annuler</button>
+    <button id="rcOk" class="primary">Valider</button>
+  </footer>
+</div></div>
+
+<!-- plan -->
+<div class="modal" id="mPlan" hidden><div class="dlg">
+  <header>Plan &amp; mini-carte</header>
+  <div class="body">
+    <div class="row" style="margin-bottom:10px;flex-wrap:wrap">
+      <label class="btn">Importer une image de plan…<input type="file" id="inPlan" accept="image/*" hidden></label>
+      <button id="planClear">Retirer l'image</button>
+      <p class="help" style="flex:1;min-width:200px">Choisissez une pièce, puis cliquez sur le plan pour la placer. Le plan est facultatif : sans image, une grille est utilisée.</p>
+    </div>
+    <div class="chips" id="planChips"></div>
+    <div id="planArea"></div>
+  </div>
+  <footer><button id="planUnplace">Retirer la pièce du plan</button><div style="flex:1"></div><button id="planDone" class="primary">Terminé</button></footer>
+</div></div>
+
+<!-- export -->
+<div class="modal" id="mExport" hidden><div class="dlg small">
+  <header>Visite exportée</header>
+  <div class="body stack">
+    <p style="margin:0">Le fichier <b id="exName"></b> (<span id="exSize"></span>) contient toute la visite : photos, plan et lecteur. Il s'ouvre dans n'importe quel navigateur, sur ordinateur comme sur téléphone (connexion internet nécessaire pour le moteur 3D).</p>
+    <p style="margin:0"><b>Pour obtenir un lien à partager</b>, mettez ce fichier en ligne :</p>
+    <ul style="margin:0;padding-left:20px">
+      <li><b>GitHub Pages</b> : renommez-le <code>index.html</code> (ou gardez son nom), déposez-le dans un dépôt avec Pages activé ; le lien sera <code>https://compte.github.io/depot/nom-du-fichier.html</code>.</li>
+      <li>Ou tout hébergeur de site statique (glisser-déposer du fichier).</li>
+    </ul>
+  </div>
+  <footer><button id="exClose" class="primary">OK</button></footer>
+</div></div>
+
+<input type="file" id="inProject" accept=".visite,.json,application/json" hidden>
+<input type="file" id="inFace" accept="image/*" hidden>
+<script type="module" src="editor.js"></script>
+</body>
+</html>
