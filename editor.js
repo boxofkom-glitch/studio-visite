@@ -1,11 +1,17 @@
-import { createViewer, sceneThumb } from './viewer.js';
+import { createViewer, sceneThumb, CATALOG } from './viewer.js';
 import * as db from './db.js';
 import { rectify, outputSize } from './rectify.js';
 
 const $ = s => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+const IMPORTMAP = '{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}';
+
+/** Pièces types : [nom, largeur, profondeur]. */
+const ROOM_PRESETS = [
+  ['Séjour', 5, 4.2], ['Cuisine', 3, 2.8], ['Chambre', 3.6, 3.3], ['Salle de bain', 2.4, 2],
+  ['WC', 1.1, 1.6], ['Entrée', 2, 1.8], ['Bureau', 3, 2.8], ['Balcon / terrasse', 3.5, 1.6], ['Pièce vide', 4, 4],
+];
 
 const FACE_ORDER = ['north', 'west', 'east', 'south', 'floor', 'ceiling'];
 const FACE_LABEL = { north: 'Mur en face', west: 'Mur gauche', east: 'Mur droit', south: 'Mur derrière', floor: 'Sol', ceiling: 'Plafond' };
@@ -68,8 +74,9 @@ async function storeImage(blob) {
   return id;
 }
 
+/** Supprime une image du stockage si plus rien ne l'utilise (les pièces dupliquées partagent leurs photos). */
 async function dropImage(id) {
-  if (!id) return;
+  if (!id || referencedImages(project).has(id)) return;
   await db.del('images', id);
   const u = urls.get(id);
   if (u) URL.revokeObjectURL(u);
@@ -85,6 +92,11 @@ function referencedImages(p, display = false) {
     for (const f of Object.values(s.faces || {})) {
       if (f?.img) ids.add(f.img);
       if (!display && f?.src) ids.add(f.src);
+    }
+    for (const it of s.items || []) {
+      if (it.img) ids.add(it.img);
+      if (it.model) ids.add(it.model);
+      if (!display && it.src) ids.add(it.src);
     }
   }
   return ids;
@@ -120,6 +132,7 @@ async function loadProject(id) {
   }
   try { localStorage.setItem('sv-last', id); } catch {}
   sel = project.scenes[0]?.id || null;
+  selItemId = null;
   $('#projName').value = project.name;
   await renderProjects();
   renderList();
@@ -159,7 +172,7 @@ function renderList() {
     const th = sceneThumb(s);
     const kind = s.type === 'room' ? 'Pièce 3D' : (s.hfov >= 359 ? 'Photo 360°' : `Panorama ${Math.round(s.hfov)}°`);
     it.innerHTML = `<div class="th" style="${th ? `background-image:url('${imageURL(th)}')` : ''}"></div>
-      <div class="nm">${esc(s.name)} ${s.id === startId ? '<span class="star" title="Pièce de départ">★</span>' : ''}<small>${kind} · ${(s.hotspots || []).length} passage(s)</small></div>`;
+      <div class="nm">${esc(s.name)} ${s.id === startId ? '<span class="star" title="Pièce de départ">★</span>' : ''}<small>${kind} · ${(s.hotspots || []).length + (s.items || []).filter(i => i.target).length} passage(s)${s.items?.length ? ` · ${s.items.length} meuble(s)` : ''}</small></div>`;
     it.onclick = () => select(s.id);
     box.appendChild(it);
   }
@@ -168,6 +181,8 @@ function renderList() {
 function select(id) {
   if (sel === id) return;
   sel = id;
+  selItemId = null;
+  viewer.selectItem(null);
   setPicking(false);
   renderList();
   renderProps();
@@ -178,8 +193,25 @@ function select(id) {
 function renderProps() {
   const s = scene(sel);
   const box = $('#props');
-  const projectSection = `<section><h3>Projet</h3><button class="danger" id="pDelProj">Supprimer ce projet</button></section>`;
-  if (!s) { box.innerHTML = projectSection; $('#pDelProj').onclick = deleteProject; return; }
+  const I = project.info || {};
+  const inf = (k, label, ph = '') => `<label class="field">${label}<input type="text" data-info="${k}" value="${esc(I[k] || '')}" placeholder="${esc(ph)}"></label>`;
+  const projectSection = `
+    <section class="stack"><h3>Fiche du bien (affichée dans la visite)</h3>
+      ${inf('titre', 'Titre', 'Appartement T3 lumineux')}
+      <div class="row">${inf('prix', 'Prix', '245 000 €')}${inf('surface', 'Surface', '68 m²')}</div>
+      ${inf('details', 'Détails', '3 pièces · 2 chambres · balcon')}
+      ${inf('agence', 'Agence')}
+      ${inf('contact', 'Contact (téléphone, e-mail)', '04 00 00 00 00, contact@agence.fr')}
+    </section>
+    <section><h3>Projet</h3><button class="danger" id="pDelProj">Supprimer ce projet</button></section>`;
+  const bindProject = () => {
+    $('#pDelProj').onclick = deleteProject;
+    box.querySelectorAll('[data-info]').forEach(inp => inp.oninput = () => {
+      (project.info ||= {})[inp.dataset.info] = inp.value.trim();
+      commit({ list: false });
+    });
+  };
+  if (!s) { box.innerHTML = projectSection; bindProject(); return; }
   const others = project.scenes.filter(x => x.id !== s.id);
   const isStart = (project.start || project.scenes[0]?.id) === s.id;
 
@@ -219,6 +251,7 @@ function renderProps() {
       <label class="field">Nom<input type="text" id="pName" value="${esc(s.name)}"></label>
       ${typeBlock}
     </section>
+    ${s.type === 'room' ? furnitureBlock(s) : `<section class="stack"><h3>Meubles &amp; déco</h3><p class="help">Les meubles se placent dans les <b>pièces 3D</b>. Une photo 360° n'a pas de profondeur : on ne peut pas y poser un meuble de façon réaliste.</p></section>`}
     <section class="stack">
       <h3>Points de passage</h3>
       ${hs || '<p class="help">Aucun. Ajoutez-en un sur chaque porte pour passer d\'une pièce à l\'autre.</p>'}
@@ -229,11 +262,14 @@ function renderProps() {
       <button id="pView">Utiliser la vue actuelle comme vue d'arrivée</button>
       <button id="pStart" ${isStart ? 'disabled' : ''}>${isStart ? '★ Pièce de départ de la visite' : 'Définir comme pièce de départ'}</button>
       <div class="row"><button id="pUp" style="flex:1">↑ Monter</button><button id="pDown" style="flex:1">↓ Descendre</button></div>
+      <button id="pDup">Dupliquer cette pièce</button>
       <button class="danger" id="pDel">Supprimer cette pièce</button>
     </section>
     ${projectSection}`;
 
-  $('#pDelProj').onclick = deleteProject;
+  bindProject();
+  if (s.type === 'room') bindFurniture(s, box);
+  $('#pDup').onclick = () => duplicateScene(s);
   $('#pName').oninput = e => { s.name = e.target.value; commit(); };
   if (s.type === 'pano') {
     $('#pHfov').oninput = e => { s.hfov = +e.target.value; $('#pHfovV').textContent = s.hfov + '°'; commit({ list: false }); };
@@ -296,6 +332,226 @@ async function deleteScene(s) {
   commit({ props: true });
 }
 
+function duplicateScene(s) {
+  const c = JSON.parse(JSON.stringify(s));
+  c.id = 's_' + uid();
+  c.name = s.name + ' (copie)';
+  delete c.map;
+  c.hotspots = (c.hotspots || []).map(h => ({ ...h, id: 'h_' + uid() }));
+  if (c.items) c.items = c.items.map(i => ({ ...i, id: 'i_' + uid() }));
+  project.scenes.splice(project.scenes.indexOf(s) + 1, 0, c);
+  sel = c.id;
+  selItemId = null;
+  commit({ props: true });
+  viewer.refresh(project).then(() => viewer.goTo(c.id));
+}
+
+// ---------- meubles & déco ----------
+let selItemId = null;
+
+function furnitureBlock(s) {
+  const items = s.items || [];
+  const it = items.find(i => i.id === selItemId);
+  return `<section class="stack">
+    <h3>Meubles &amp; déco (${items.length})</h3>
+    ${items.length
+      ? `<div class="items">${items.map(i => `<button class="item ${i.id === selItemId ? 'sel' : ''}" data-item="${i.id}">${esc(i.name)}</button>`).join('')}</div>
+         <p class="help">Touchez un meuble dans la vue pour le choisir, faites-le glisser pour le déplacer.</p>`
+      : '<p class="help">Meublez la pièce : canapé, lit, table, plantes, cadres, portes… puis faites glisser les meubles dans la vue pour les placer.</p>'}
+    <button id="pAddItem" class="primary">+ Ajouter un meuble / déco</button>
+    ${it ? itemForm(it, s) : ''}
+  </section>`;
+}
+
+function itemForm(it, s) {
+  const C = CATALOG[it.kind] || {};
+  const others = project.scenes.filter(x => x.id !== s.id);
+  const num = (f, label, step = 0.05) => `<label class="field">${label}<input type="number" step="${step}" min="0" data-f="${f}" value="${it[f] ?? 0}"></label>`;
+  return `<div class="itemform stack">
+    <div class="row"><b style="flex:1">Réglages</b><span class="tag">${esc(C.label || '')}</span></div>
+    <label class="field">Nom<input type="text" data-f="name" value="${esc(it.name)}"></label>
+    <div class="row">${num('w', 'Largeur (m)')}${num('d', 'Profondeur')}${num('h', 'Hauteur')}</div>
+    <div class="row">${num('y', 'Hauteur du sol (m)')}<label class="field">Couleur<input type="color" data-f="color" value="${it.color}"></label></div>
+    <label class="field">Orientation : <b class="rotv">${it.rot || 0}°</b><input type="range" min="0" max="355" step="5" data-f="rot" value="${it.rot || 0}"></label>
+    ${C.door ? `<label class="field">Mène vers (passage dans la visite)<select data-f="target"><option value="">— aucune pièce —</option>${others.map(o => `<option value="${o.id}" ${o.id === it.target ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>` : ''}
+    ${C.photo ? `<div class="row"><button id="iPhoto" style="flex:1">${it.img ? 'Changer la photo…' : 'Mettre une photo…'}</button>${it.img ? '<button id="iNoPhoto">Retirer</button>' : ''}</div>` : ''}
+    ${it.kind === 'modele' ? `<button id="iModel">${it.model ? 'Changer le modèle…' : 'Choisir un fichier .glb…'}</button><p class="help">Modèle 3D au format .glb (par ex. exporté depuis Blender ou SketchUp). La hauteur règle sa taille.</p>` : ''}
+    <div class="row"><button id="iRot90" style="flex:1">Pivoter 90°</button><button id="iWall" style="flex:1">Contre le mur</button></div>
+    <div class="row"><button id="iDup" style="flex:1">Dupliquer</button><button id="iDel" class="danger" style="flex:1">Supprimer</button></div>
+  </div>`;
+}
+
+function bindFurniture(s, box) {
+  box.querySelectorAll('[data-item]').forEach(b => b.onclick = () => selectItem(b.dataset.item));
+  $('#pAddItem').onclick = () => openCatalog(s);
+  const it = (s.items || []).find(i => i.id === selItemId);
+  if (!it) return;
+  box.querySelectorAll('.itemform [data-f]').forEach(inp => inp.oninput = () => {
+    const f = inp.dataset.f;
+    let v = inp.value;
+    if (['w', 'd', 'h', 'y', 'rot'].includes(f)) {
+      v = parseFloat(v);
+      if (!(v >= 0) || (['w', 'd', 'h'].includes(f) && v < 0.005)) return;
+    }
+    it[f] = v;
+    if (f === 'rot') box.querySelector('.rotv').textContent = v + '°';
+    if (f === 'name') { const b = box.querySelector(`[data-item="${it.id}"]`); if (b) b.textContent = v; }
+    commit({ list: f === 'target' });
+  });
+  $('#iRot90').onclick = () => { it.rot = ((it.rot || 0) + 90) % 360; commit({ props: true }); };
+  $('#iWall').onclick = () => { snapToWall(it, s); commit({ props: true }); };
+  $('#iDup').onclick = () => {
+    const c = { ...it, id: 'i_' + uid(), x: +(it.x + 0.3).toFixed(2), z: +(it.z + 0.3).toFixed(2) };
+    s.items.push(c);
+    selItemId = c.id;
+    viewer.selectItem(c.id);
+    commit({ props: true });
+  };
+  $('#iDel').onclick = async () => {
+    s.items = s.items.filter(i => i !== it);
+    selItemId = null;
+    viewer.selectItem(null);
+    await dropImage(it.img); await dropImage(it.src); await dropImage(it.model);
+    commit({ props: true });
+  };
+  if ($('#iPhoto')) $('#iPhoto').onclick = () => itemPhoto(it);
+  if ($('#iNoPhoto')) $('#iNoPhoto').onclick = async () => {
+    const { img, src } = it;
+    delete it.img; delete it.src;
+    await dropImage(img); await dropImage(src);
+    commit({ props: true });
+  };
+  if ($('#iModel')) $('#iModel').onclick = () => itemModel(it);
+}
+
+function selectItem(id) {
+  selItemId = id;
+  viewer.selectItem(id);
+  renderProps();
+  if (id) document.querySelector('.itemform')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/** Plaque le meuble contre le mur le plus proche, face vers l'intérieur. */
+function snapToWall(it, s) {
+  const { w, d } = s.dims, gap = it.d / 2 + 0.01;
+  const walls = [
+    [it.z + d / 2, () => { it.rot = 0; it.z = -d / 2 + gap; }],
+    [d / 2 - it.z, () => { it.rot = 180; it.z = d / 2 - gap; }],
+    [it.x + w / 2, () => { it.rot = 90; it.x = -w / 2 + gap; }],
+    [w / 2 - it.x, () => { it.rot = 270; it.x = w / 2 - gap; }],
+  ];
+  walls.sort((a, b) => a[0] - b[0])[0][1]();
+  it.x = +it.x.toFixed(3);
+  it.z = +it.z.toFixed(3);
+}
+
+function makeItem(kind, s, x, z, rot = 0, extra = {}) {
+  const C = CATALOG[kind];
+  const it = {
+    id: 'i_' + uid(), kind, name: C.label, x, z, rot,
+    y: C.y === 'ceil' ? Math.max(2.05, s.dims.h - 0.45 - C.h) : (C.y || 0),
+    w: C.w, d: C.d, h: C.h, color: C.color, ...extra,
+  };
+  if (C.wall) snapToWall(it, s);
+  return it;
+}
+
+function openCatalog(s) {
+  const cats = {};
+  for (const [k, c] of Object.entries(CATALOG)) (cats[c.cat] ||= []).push([k, c]);
+  $('#catBody').innerHTML = Object.entries(cats).map(([cat, list]) => `<h4>${esc(cat)}</h4><div class="cat-grid">${list.map(([k, c]) =>
+    `<button data-kind="${k}"><b>${esc(c.label)}</b><small>${k === 'modele' ? 'fichier .glb' : `${c.w} × ${c.d} × ${c.h} m`}</small></button>`).join('')}</div>`).join('');
+  $('#mCat').hidden = false;
+  $('#catBody').querySelectorAll('[data-kind]').forEach(b => b.onclick = () => {
+    $('#mCat').hidden = true;
+    const p = viewer.frontPoint();
+    const it = makeItem(b.dataset.kind, s, p.x, p.z);
+    (s.items ||= []).push(it);
+    selItemId = it.id;
+    commit({ props: true });
+    viewer.selectItem(it.id);
+    if (it.kind === 'modele') itemModel(it);
+  });
+}
+$('#catClose').onclick = () => { $('#mCat').hidden = true; };
+
+async function itemPhoto(it) {
+  const file = await pickFile($('#inFace'));
+  if (!file) return;
+  const im = await busy('Chargement de la photo…', () => prepareImage(file, PHOTO_MAX));
+  const srcId = await storeImage(im.blob);
+  const bmp = await createImageBitmap(im.blob);
+  const [rw, rh] = it.kind === 'tapis' ? [it.w, it.d] : [it.w, it.h];
+  const res = await rectifyDialog(bmp, [[0, 0], [bmp.width, 0], [bmp.width, bmp.height], [0, bmp.height]], `${it.name} (${rw} × ${rh} m)`);
+  if (!res) { bmp.close(); await dropImage(srcId); return; }
+  await busy('Redressement…', async () => {
+    const [ow, oh] = outputSize(rw, rh, 1536);
+    const out = await new Promise(r => rectify(bmp, res, ow, oh).toBlob(r, 'image/jpeg', 0.88));
+    const old = [it.img, it.src];
+    it.img = await storeImage(out);
+    it.src = srcId;
+    for (const o of old) await dropImage(o);
+  });
+  bmp.close();
+  commit({ props: true });
+}
+
+async function itemModel(it) {
+  const file = await pickFile($('#inModel'));
+  if (!file) return;
+  if (!/\.glb$/i.test(file.name)) { toast('Choisissez un fichier .glb'); return; }
+  if (file.size > 25 * 1048576) toast(`Modèle lourd (${(file.size / 1048576).toFixed(0)} Mo) : la visite exportée sera longue à charger.`, 5000);
+  const old = it.model;
+  it.model = await storeImage(new Blob([file], { type: 'model/gltf-binary' }));
+  if (it.name === CATALOG.modele.label) it.name = nameFromFile(file);
+  await dropImage(old);
+  commit({ props: true });
+}
+
+// ---------- pièces types ----------
+function presetItems(name, s) {
+  const { w, d } = s.dims;
+  const M = (kind, x, z, rot = 0, extra) => makeItem(kind, s, +x.toFixed(2), +z.toFixed(2), rot, extra);
+  switch (name) {
+    case 'Séjour': return [
+      M('tapis', 0, d / 2 - 1.5), M('canape', 0, d / 2 - 0.55, 180), M('table_basse', 0, d / 2 - 1.55),
+      M('meuble_tv', 0, -d / 2 + 0.22), M('fauteuil', -w / 2 + 0.6, d / 2 - 1.6, 90), M('plante', w / 2 - 0.45, -d / 2 + 0.45),
+      M('lampadaire', w / 2 - 0.4, d / 2 - 0.4), M('suspension', 0, d / 2 - 1.5), M('fenetre', w / 2 - 1.2, -d / 2 + 0.1)];
+    case 'Chambre': return [
+      M('lit', 0, -d / 2 + 1.03), M('chevet', -1.05, -d / 2 + 0.21), M('chevet', 1.05, -d / 2 + 0.21),
+      M('armoire', w / 2 - 0.31, d / 2 - 0.8, 270), M('cadre', 0, -d / 2 + 0.1, 0, { y: 1.35, w: 1.0, h: 0.5 }),
+      M('suspension', 0, 0), M('fenetre', -w / 2 + 0.1, d / 2 - 1.2)];
+    case 'Cuisine': return [
+      M('comptoir', 0, -d / 2 + 0.33, 0, { w: +Math.min(w - 0.3, 2.6).toFixed(2), color: '#f2efe9' }),
+      M('table', 0, 0.55, 0, { w: 1.2, d: 0.8 }), M('chaise', 0, -0.1), M('chaise', 0, 1.2, 180), M('suspension', 0, 0.55)];
+    case 'Salle de bain': return [M('vasque', 0, -d / 2 + 0.25), M('baignoire', 0, d / 2 - 0.38, 180)];
+    case 'WC': return [M('wc', 0, -d / 2 + 0.33)];
+    case 'Entrée': return [M('commode', 0, -d / 2 + 0.26, 0, { w: 0.9 }), M('miroir', 0, -d / 2 + 0.1, 0, { y: 1.0, h: 0.8 }), M('plante', w / 2 - 0.35, d / 2 - 0.35, 0, { w: 0.45, h: 0.9 })];
+    case 'Bureau': return [M('bureau', 0, -d / 2 + 0.31), M('chaise', 0, -d / 2 + 0.9, 180), M('etagere', w / 2 - 0.18, 0, 270), M('plante', -w / 2 + 0.4, d / 2 - 0.4)];
+    case 'Balcon / terrasse': return [M('table_ronde', 0, 0, 0, { w: 0.7 }), M('chaise', -0.6, 0, 90), M('chaise', 0.6, 0, 270), M('plante', -w / 2 + 0.35, -d / 2 + 0.35, 0, { w: 0.5, h: 0.9 }), M('plante', w / 2 - 0.35, -d / 2 + 0.35, 0, { w: 0.5, h: 0.9 })];
+    default: return [];
+  }
+}
+
+function openRooms() {
+  $('#roomsBody').innerHTML = `<div class="cat-grid">${ROOM_PRESETS.map(([n, w, d]) =>
+    `<button data-room="${esc(n)}"><b>${esc(n)}</b><small>${w} × ${d} m</small></button>`).join('')}</div>`;
+  $('#mRooms').hidden = false;
+  $('#roomsBody').querySelectorAll('[data-room]').forEach(b => b.onclick = () => {
+    $('#mRooms').hidden = true;
+    const [n, w, d] = ROOM_PRESETS.find(r => r[0] === b.dataset.room);
+    const count = project.scenes.filter(x => x.name === n || x.name.startsWith(n + ' ')).length;
+    const s = { id: 's_' + uid(), type: 'room', name: count ? `${n} ${count + 1}` : n, dims: { w, d, h: 2.5 }, faces: {}, items: [], hotspots: [], view: null };
+    if ($('#roomsFurnish').checked) s.items = presetItems(n, s);
+    project.scenes.push(s);
+    sel = s.id;
+    selItemId = null;
+    commit({ props: true });
+    viewer.refresh(project).then(() => viewer.goTo(s.id));
+  });
+}
+$('#roomsClose').onclick = () => { $('#mRooms').hidden = true; };
+
 // ---------- points de passage ----------
 function setPicking(on) {
   picking = on;
@@ -350,14 +606,6 @@ async function addPanos(files) {
   commit({ props: true });
   await viewer.refresh(project);
   viewer.goTo(firstId);
-}
-
-function addRoom() {
-  const s = { id: 's_' + uid(), type: 'room', name: 'Pièce 3D', dims: { w: 4, d: 5, h: 2.6 }, faces: {}, hotspots: [], view: null };
-  project.scenes.push(s);
-  sel = s.id;
-  commit({ props: true });
-  viewer.refresh(project).then(() => viewer.goTo(s.id));
 }
 
 // ---------- photos des murs (redressement) ----------
@@ -536,8 +784,9 @@ $('#inPlan').onchange = async e => {
 };
 $('#planClear').onclick = async () => {
   if (!project.plan) return;
-  await dropImage(project.plan.image);
+  const old = project.plan.image;
   project.plan = null;
+  await dropImage(old);
   commit();
   renderPlan();
 };
@@ -552,10 +801,11 @@ async function exportHTML() {
   const images = {};
   for (const id of ids) images[id] = await blobToDataURL(await (await fetch(imageURL(id))).blob());
   const data = {
-    name: project.name, start: project.start, plan: project.plan,
+    name: project.name, start: project.start, plan: project.plan, info: project.info,
     scenes: project.scenes.map(s => ({
       ...s,
       faces: s.faces ? Object.fromEntries(Object.entries(s.faces).map(([k, v]) => [k, { img: v.img }])) : undefined,
+      items: s.items?.map(({ src, ...i }) => i),
     })),
   };
   const json = o => JSON.stringify(o).replace(/</g, '\\u003c');
@@ -566,7 +816,7 @@ async function exportHTML() {
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>${esc(project.name)}</title>
 <meta property="og:title" content="${esc(project.name)}">
-<script type="importmap">{"imports":{"three":"${THREE_URL}"}}</script>
+<script type="importmap">${IMPORTMAP}</script>
 <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}</style>
 </head>
 <body>
@@ -651,12 +901,16 @@ $('#btnOpen').onclick = async () => {
 // ---------- démarrage ----------
 const viewer = createViewer($('#viewerHost'), blankProject(), imageURL, {
   onPick,
-  onSceneChange: id => { if (sel !== id) { sel = id; setPicking(false); renderList(); renderProps(); } },
+  onSceneChange: id => { if (sel !== id) { sel = id; selItemId = null; viewer.selectItem(null); setPicking(false); renderList(); renderProps(); } },
+  editItems: true,
+  onItemSelect: id => { if (selItemId !== id) selectItem(id); },
+  onItemChange: () => commit({ list: false }),
   emptyText: '',
+  hint: false,
 });
 
 $('#inPano').onchange = e => { const fs = [...e.target.files]; e.target.value = ''; addPanos(fs); };
-$('#btnRoom').onclick = addRoom;
+$('#btnRoom').onclick = openRooms;
 $('#btnPlan').onclick = openPlan;
 $('#btnNew').onclick = newProject;
 $('#projSel').onchange = e => loadProject(e.target.value);

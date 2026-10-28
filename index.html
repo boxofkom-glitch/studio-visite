@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Studio Visite</title>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <style>
 :root{--bg:#f4f2ee;--panel:#fff;--ink:#1d1b18;--mute:#6f6a62;--line:#e3dfd8;--acc:#d2552f;--acc2:#b8441f}
 *{box-sizing:border-box}
@@ -76,6 +76,16 @@ aside h3{margin:0 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:
 .preview{position:fixed;inset:0;z-index:80;background:#000}
 .preview iframe{width:100%;height:100%;border:0;display:block}
 .preview button{position:absolute;left:50%;top:12px;transform:translateX(-50%)}
+.items{display:flex;flex-wrap:wrap;gap:6px}
+.items .item{padding:4px 10px;font-size:13px;border-radius:14px}
+.items .item.sel{background:var(--acc);border-color:var(--acc);color:#fff}
+.itemform{background:#faf8f5;border:1px solid var(--line);border-radius:10px;padding:10px}
+.itemform input[type=color]{height:34px;padding:2px;width:100%}
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.cat-grid button{flex-direction:column;align-items:flex-start;gap:2px;padding:10px 12px;white-space:normal;text-align:left}
+.cat-grid small{color:var(--mute);font-size:11.5px}
+#catBody h4{margin:14px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}
+#catBody h4:first-child{margin-top:0}
 code{background:#f1eee9;padding:1px 5px;border-radius:4px}
 @media (max-width:800px){
   main{flex-direction:column-reverse;height:auto}
@@ -106,7 +116,7 @@ code{background:#f1eee9;padding:1px 5px;border-radius:4px}
       <div class="stack" style="margin-top:10px">
         <label class="btn primary" style="background:var(--acc);color:#fff;border-color:var(--acc);font-weight:600">+ Ajouter des photos 360° / panoramas
           <input type="file" id="inPano" accept="image/*" multiple hidden></label>
-        <button id="btnRoom">+ Pièce 3D (murs en photo)</button>
+        <button id="btnRoom">+ Pièce 3D (à meubler)…</button>
         <button id="btnPlan">Plan &amp; mini-carte…</button>
       </div>
     </section>
@@ -123,7 +133,7 @@ code{background:#f1eee9;padding:1px 5px;border-radius:4px}
         <li><b>Reliez les pièces</b> avec des points de passage (portes, couloirs).</li>
         <li><b>Exportez</b> : vous obtenez un fichier unique à mettre en ligne et à partager.</li>
       </ol>
-      <p class="help">Pas de photo 360° ? Créez une <b>pièce 3D</b> : indiquez ses dimensions, puis plaquez une photo sur chaque mur, le sol et le plafond.</p>
+      <p class="help">Pas de photo 360° ? Créez une <b>pièce 3D</b> (séjour, chambre, cuisine…) : ajustez ses dimensions, plaquez les photos des murs et du sol, puis meublez-la (home staging virtuel).</p>
     </div></div>
   </div>
 </main>
@@ -173,6 +183,25 @@ code{background:#f1eee9;padding:1px 5px;border-radius:4px}
   <footer><button id="exClose" class="primary">OK</button></footer>
 </div></div>
 
+<!-- catalogue de meubles -->
+<div class="modal" id="mCat" hidden><div class="dlg">
+  <header>Ajouter un meuble / déco</header>
+  <div class="body" id="catBody"></div>
+  <footer><button id="catClose">Fermer</button></footer>
+</div></div>
+
+<!-- pièces types -->
+<div class="modal" id="mRooms" hidden><div class="dlg small">
+  <header>Nouvelle pièce 3D</header>
+  <div class="body stack">
+    <p class="help" style="margin:0">Choisissez le type de pièce. Vous pourrez ensuite modifier ses dimensions, plaquer les photos des murs et déplacer les meubles.</p>
+    <label class="row" style="gap:6px"><input type="checkbox" id="roomsFurnish" checked> Meubler automatiquement (home staging de base)</label>
+    <div id="roomsBody"></div>
+  </div>
+  <footer><button id="roomsClose">Annuler</button></footer>
+</div></div>
+
+<input type="file" id="inModel" accept=".glb,model/gltf-binary" hidden>
 <input type="file" id="inProject" accept=".visite,.json,application/json" hidden>
 <input type="file" id="inFace" accept="image/*" hidden>
 <script type="module" src="editor.js"></script>
